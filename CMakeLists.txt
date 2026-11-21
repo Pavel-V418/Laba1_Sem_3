@@ -18,11 +18,17 @@ endfunction()
 add_library(laba1_core INTERFACE)
 target_include_directories(laba1_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# Основная программа (консольный интерфейс - этап 12; пока демонстрация)
+# Основная программа (консольный интерфейс)
 add_executable(laba1 main.cpp)
 target_include_directories(laba1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(laba1 PRIVATE laba1_core)
 laba1_warnings(laba1)
+
+# Бенчмарк производительности
+add_executable(laba1_benchmark include/benchmark/benchmark.cpp)
+target_include_directories(laba1_benchmark PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/benchmark)
+target_link_libraries(laba1_benchmark PRIVATE laba1_core)
+laba1_warnings(laba1_benchmark)
 
 # Тесты на GoogleTest
 option(LABA1_BUILD_TESTS "Build GoogleTest tests" ON)
@@ -49,5 +55,5 @@ if (LABA1_BUILD_TESTS)
     laba1_warnings(laba1_tests)
 
     include(GoogleTest)
-    gtest_discover_tests(laba1_tests DISCOVERY_TIMEOUT 60)
+    gtest_discover_tests(laba1_tests DISCOVERY_MODE PRE_TEST DISCOVERY_TIMEOUT 60)
 endif()

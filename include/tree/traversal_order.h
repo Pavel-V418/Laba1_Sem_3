@@ -5,9 +5,6 @@
 #include "tree_exceptions.h"
 
 // Порядок обхода бинарного дерева + скобки для строкового представления.
-//
-// Формат-строка состоит из трёх частей - по одной на К (корень), Л (левое поддерево),
-// П (правое поддерево), в порядке обхода:
 //     "{К}(Л)[П]"   - КЛП: корень в {}, левое поддерево в (), правое в []
 //     "(Л)К[П]"     - ЛКП: корень без скобок (как в пояснении ТЗ "{1]К[2][3}")
 //     "{K}(L)[R]"   - то же латиницей (K - root, L - left, R - right), удобно в консоли Windows
@@ -17,14 +14,12 @@
 //   - части Л и П обязательно в скобках: пустое поддерево записывается как пустые скобки "()";
 //   - К может быть без скобок, но не первой частью (иначе пустое поддерево
 //     неотличимо от узла с пустым значением);
-//   - скобка - один печатный ASCII-символ, не буква/цифра, не пробел и не '\\';
-//     открывающая и закрывающая скобки могут быть любыми ("{1]" из ТЗ тоже допустимо);
 //   - закрывающая скобка Л/П не совпадает с открывающей скобкой первой части
 //     (иначе нельзя понять, пусто поддерево или начинается новый узел).
 //
 // Значения в строке экранируются: '\\' и все символы скобок записываются как "\\<символ>".
 
-enum class TraversalPart {
+enum class TraversalPart { // посетить корень (К), обойти левое поддерево (Л), обойти правое (П).
     Root,
     Left,
     Right
@@ -34,17 +29,18 @@ class TraversalOrder {
 public:
     static constexpr int PARTS = 3;
 
-    // Разбор формат-строки вида "{К}(Л)[П]"
+    /* Создание TraversalOrder */
+    // Принимает готовый формат-строки вида "{К}(Л)[П]"
     static TraversalOrder parse(const std::string& format) {
-        TraversalOrder order;
-        std::size_t pos = 0;
+        TraversalOrder order; // здесь пишем порядок и скобки
+        std::size_t pos = 0; // std::size_t подходит для индексов и совпадает с типом результата format.size()
 
         for (int i = 0; i < PARTS; i++) {
             if (pos >= format.size())
                 throw ParseException("format: expected 3 parts (К, Л, П), got " + std::to_string(i));
 
             TraversalPart part;
-            if (read_letter(format, pos, part)) {
+            if (read_letter(format, pos, part)) { // прочитали букву
                 // часть без скобок - допустима только для корня
                 if (part != TraversalPart::Root)
                     throw ParseException("format: subtree part must be enclosed in brackets");
@@ -53,7 +49,7 @@ public:
                 order.open_[i] = order.close_[i] = '\0';
                 continue;
             }
-
+            // попалась скобка
             char open = format[pos++];
             check_bracket(open);
             if (!read_letter(format, pos, part))
@@ -78,7 +74,7 @@ public:
 
     // Один из 6 стандартных обходов по буквам ("КЛП", "ЛКП", "LKR", ...) со скобками
     // по умолчанию: К - {}, Л - (), П - [].  Это "сохранение по фиксированному обходу".
-    static TraversalOrder standard(const std::string& letters) {
+    static TraversalOrder standard(const std::string& letters) { // принимает только порядок
         TraversalOrder order;
         std::size_t pos = 0;
         for (int i = 0; i < PARTS; i++) {
@@ -102,12 +98,12 @@ public:
     char open(int i) const { return open_[i]; }
     char close(int i) const { return close_[i]; }
 
-    // Символ, который в значениях надо экранировать
+    // Проверка на служебный символ
     bool is_special(char c) const {
         if (c == ESCAPE)
             return true;
         for (int i = 0; i < PARTS; i++)
-            if (bracketed_[i] && (c == open_[i] || c == close_[i]))
+            if (bracketed_[i] && (c == open_[i] || c == close_[i])) // скобка
                 return true;
         return false;
     }
@@ -125,7 +121,7 @@ public:
         return result;
     }
 
-    // Только буквы: "КЛП"
+    // Только буквы: "КЛП" - порядко обхода
     std::string letters() const {
         std::string result;
         for (int i = 0; i < PARTS; i++)
@@ -133,13 +129,13 @@ public:
         return result;
     }
 
-    static constexpr char ESCAPE = '\\';
+    static constexpr char ESCAPE = '\\'; // символ для экранирования (сказать сл. символ прочитать как часть текста)
 
 private:
-    TraversalPart parts_[PARTS];
-    bool bracketed_[PARTS];
-    char open_[PARTS];
-    char close_[PARTS];
+    TraversalPart parts_[PARTS]; // части на каждом шаге {Root, Left, Right}
+    bool bracketed_[PARTS]; // есть ли у части скобки {true, true, true}
+    char open_[PARTS]; // открывающая скобка {'{', '(', '['}
+    char close_[PARTS]; // закрывающая скобка {'}', ')', ']'}
 
     TraversalOrder() : parts_(), bracketed_(), open_(), close_() {}
 
@@ -164,7 +160,7 @@ private:
         if (pos >= s.size())
             return false;
 
-        char c = s[pos];
+        char c = s[pos]; // Латинские буквы - 1 байт
         if (c == 'K' || c == 'k') { part = TraversalPart::Root;  pos++; return true; }
         if (c == 'L' || c == 'l') { part = TraversalPart::Left;  pos++; return true; }
         if (c == 'R' || c == 'r') { part = TraversalPart::Right; pos++; return true; }
@@ -176,22 +172,22 @@ private:
         for (int i = 0; i < 6; i++) {
             if (s.compare(pos, 2, cyrillic[i]) == 0) {
                 part = kinds[i];
-                pos += 2;
+                pos += 2; // пропускает оба байта буквы
                 return true;
             }
         }
         return false;
     }
 
-    static void check_bracket(char c) {
+    static void check_bracket(char c) { // можно ли использовать этот символ как скобку
         bool printable = c > ' ' && c < 127;
-        bool alnum = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        bool alnum = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); // явл ли смовол цифрой или буквой
         if (!printable || alnum || c == ESCAPE)
             throw ParseException("format: invalid bracket character");
     }
 
-    void validate() const {
-        int seen[PARTS] = {0, 0, 0};
+    void validate() const { // проверка формта
+        int seen[PARTS] = {0, 0, 0}; // Root, Left, Right соотв
         for (int i = 0; i < PARTS; i++)
             seen[static_cast<int>(parts_[i])]++;
         for (int i = 0; i < PARTS; i++)

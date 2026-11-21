@@ -69,6 +69,23 @@ public:
 
     bool operator!=(const Person& other) const { return !(*this == other); }
 
+    // Сравнение по умолчанию: сначала по id, затем по ФИО и году
+    bool operator<(const Person& other) const {
+        if (id_ != other.id_)
+            return id_ < other.id_;
+        if (last_name_ != other.last_name_)
+            return last_name_ < other.last_name_;
+        if (first_name_ != other.first_name_)
+            return first_name_ < other.first_name_;
+        if (middle_name_ != other.middle_name_)
+            return middle_name_ < other.middle_name_;
+        return birth_year_ < other.birth_year_;
+    }
+
+    bool operator>(const Person& other) const {
+        return other < *this;
+    }
+
     static constexpr int MIN_BIRTH_YEAR = 1900;
     static constexpr int MAX_BIRTH_YEAR = 2100;
 

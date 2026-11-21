@@ -3,8 +3,7 @@
 #include <stdexcept>
 #include <string>
 
-// Иерархия исключений ЛР-1. Все ошибки деревьев ловятся одним catch (const TreeException&).
-
+// Иерархия исключений. Все ошибки деревьев ловятся одним catch (const TreeException&).
 class TreeException : public std::runtime_error {
 public:
     explicit TreeException(const std::string& message)

@@ -65,6 +65,32 @@ inline int ReadInt()
     }
 }
 
+inline bool TryParseDouble(const std::string& text, double& value)
+{
+    try
+    {
+        std::size_t used = 0;
+        value = std::stod(text, &used);
+        return used == text.size();
+    }
+    catch (const std::exception&)
+    {
+        return false;
+    }
+}
+
+inline double ReadDouble()
+{
+    while (true)
+    {
+        double value;
+        if (TryParseDouble(Trim(ReadLine()), value))
+            return value;
+
+        std::cout << "Invalid input. Enter real number: ";
+    }
+}
+
 inline int ReadIntInRange(int low, int high)
 {
     while (true)

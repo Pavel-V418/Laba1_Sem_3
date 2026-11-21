@@ -1,20 +1,9 @@
 #pragma once
 
 // Стратегии балансировки для BSTree<T, Compare, Balance>.
-//
-// Стратегия - класс со статическими шаблонными методами, которые дерево вызывает после
-// изменения структуры. Выбор происходит на этапе компиляции (policy-based design):
-// никаких виртуальных вызовов, а BSTree остаётся обычным значимым типом (копируется,
-// возвращается из map/where по значению).
-//
-// Интерфейс стратегии:
-//   static constexpr bool tracks_height;            - поддерживает ли node->height
-//   after_insert(tree, node)  - node: только что вставленный лист
-//   after_remove(tree, node)  - node: самый нижний узел с изменившимся поддеревом (или nullptr)
-//   check_node(node)          - доп. инвариант узла для check_invariants()
-//
-// Стратегия - friend дерева, поэтому может пользоваться tree.replace_child и полями узлов.
+// Стратегия - класс со статическими шаблонными методами, которые дерево вызывает после изменения структуры.
 
+// Стратегия - friend дерева, поэтому может пользоваться tree.replace_child и полями узлов.
 // Обычное (несбалансированное) дерево поиска: на отсортированных данных вырождается в список.
 // struct: закрытых частей нет, только пустые реализации интерфейса.
 
@@ -36,21 +25,21 @@ struct NoBalance {
 // class, а не struct: снаружи доступен только интерфейс стратегии, повороты скрыты.
 class AvlBalance {
 public:
-    static constexpr bool tracks_height = true;
+    static constexpr bool tracks_height = true; // поддерживает ли node->height
 
     template<class Tree, class Node>
-    static void after_insert(Tree& tree, Node* node) {
+    static void after_insert(Tree& tree, Node* node) { // подъём от родителя до нового листа
         rebalance_up(tree, node->parent); // сам лист сбалансирован (высота 1)
     }
 
     template<class Tree, class Node>
-    static void after_remove(Tree& tree, Node* node) {
+    static void after_remove(Tree& tree, Node* node) { // подъём от узла, который передал remove
         rebalance_up(tree, node);
     }
 
     template<class Node>
-    static bool check_node(const Node* node) {
-        int expected = 1 + max_of(height(node->left), height(node->right));
+    static bool check_node(const Node* node) { // проверяет, правильно ли у одного узла записана высота и сбалансирован ли он
+        int expected = 1 + max_of(height(node->left), height(node->right)); // какая высота должна быть у тек узла
         int balance = balance_factor(node);
         return node->height == expected && balance >= -1 && balance <= 1;
     }
@@ -61,23 +50,22 @@ private:
         return node != nullptr ? node->height : 0;
     }
 
-    static int max_of(int a, int b) {
+    static int max_of(int a, int b) { // замена std::max
         return a > b ? a : b;
     }
 
     template<class Node>
-    static void update_height(Node* node) {
+    static void update_height(Node* node) { // пересчёт высоты узла по высотам детей
         node->height = 1 + max_of(height(node->left), height(node->right));
     }
 
     // > 0 - перевес влево, < 0 - вправо
     template<class Node>
-    static int balance_factor(const Node* node) {
+    static int balance_factor(const Node* node) { // перевес
         return height(node->left) - height(node->right);
     }
 
     // Левый поворот вокруг x (y = x->right поднимается на место x):
-    //   x(a, y(b, c))  =>  y(x(a, b), c)
     template<class Tree, class Node>
     static Node* rotate_left(Tree& tree, Node* x) {
         Node* y = x->right;

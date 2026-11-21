@@ -1,13 +1,20 @@
-// ЛР-1, этапы 1-2, 4: BSTree<T> - базовые операции, AVL-балансировка, map / where / reduce
+// ЛР-1, этапы 1-7: BSTree<T> - базовые операции, AVL-балансировка, map/where/reduce, поддеревья, прошивка, типы
+#include "tree/bs_tree.h"
+
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <random>
 #include <initializer_list>
+#include <sstream>
 #include <string>
 
-#include "tree/bs_tree.h"
 #include "model/person.h"
+#include "model/complex.h"
+#include "model/function.h"
+#include "tree/bs_tree_print.h"
 
 // В тестах STL допустим: initializer_list только для удобной записи tree_of<Tree>({1, 2, 3}).
 // Дерево собирается через конструктор ядра из обычного массива.
@@ -370,4 +377,488 @@ TEST(FromSorted, RejectsUnsortedInput) {
     int dup[] = {1, 1};
     MutableArraySequence<int> dups(dup, 2);
     EXPECT_THROW(AvlInt::from_sorted(dups), std::invalid_argument);
+}
+
+/*============ Тесты этапа 5: поддеревья ============*/
+
+TYPED_TEST(BSTreeTest, SubtreeRootLeafAndInternal) {
+    //          50
+    //       30      70
+    //     20  40  60  80
+    auto t = tree_of<TypeParam>({50, 30, 70, 20, 40, 60, 80});
+
+    // 1. Поддерево корня должно содержать все 7 элементов
+    TypeParam sub_root = t.subtree(50);
+    EXPECT_EQ(sub_root.get_count(), 7);
+    EXPECT_TRUE(sub_root.check_invariants());
+    EXPECT_TRUE(t.contains_subtree(sub_root));
+
+    // 2. Поддерево внутреннего узла 30 (узлы 30, 20, 40)
+    TypeParam sub_30 = t.subtree(30);
+    EXPECT_EQ(sub_30.get_count(), 3);
+    EXPECT_TRUE(sub_30.contains(30));
+    EXPECT_TRUE(sub_30.contains(20));
+    EXPECT_TRUE(sub_30.contains(40));
+    EXPECT_FALSE(sub_30.contains(50));
+    EXPECT_TRUE(sub_30.check_invariants());
+    EXPECT_TRUE(t.contains_subtree(sub_30));
+
+    // 3. Поддерево листа 80 (только 80)
+    TypeParam sub_80 = t.subtree(80);
+    EXPECT_EQ(sub_80.get_count(), 1);
+    EXPECT_TRUE(sub_80.contains(80));
+    EXPECT_TRUE(sub_80.check_invariants());
+    EXPECT_TRUE(t.contains_subtree(sub_80));
+
+    // 4. Несуществующий элемент -> ElementNotFoundException
+    EXPECT_THROW(t.subtree(999), ElementNotFoundException);
+}
+
+TYPED_TEST(BSTreeTest, SubtreeIndependence) {
+    auto t = tree_of<TypeParam>({50, 30, 70, 20, 40});
+    TypeParam sub = t.subtree(30);
+
+    // Модификация оригинала не затрагивает извлеченное поддерево
+    t.remove(20);
+    t.insert(35);
+    EXPECT_FALSE(t.contains(20));
+    EXPECT_TRUE(sub.contains(20));
+    EXPECT_FALSE(sub.contains(35));
+    EXPECT_EQ(sub.get_count(), 3);
+
+    // Модификация копии не затрагивает оригинал
+    sub.insert(25);
+    EXPECT_FALSE(t.contains(25));
+    EXPECT_TRUE(sub.contains(25));
+}
+
+TYPED_TEST(BSTreeTest, ContainsSubtreeEdgeCases) {
+    TypeParam empty_tree;
+    TypeParam single = tree_of<TypeParam>({10});
+    auto t = tree_of<TypeParam>({50, 30, 70, 20, 40, 60, 80});
+
+    // 1. Пустое поддерево содержится в любом дереве
+    EXPECT_TRUE(empty_tree.contains_subtree(empty_tree));
+    EXPECT_TRUE(single.contains_subtree(empty_tree));
+    EXPECT_TRUE(t.contains_subtree(empty_tree));
+
+    // 2. Непустое поддерево не содержится в пустом
+    EXPECT_FALSE(empty_tree.contains_subtree(single));
+    EXPECT_FALSE(empty_tree.contains_subtree(t));
+
+    // 3. Дерево содержит само себя
+    EXPECT_TRUE(single.contains_subtree(single));
+    EXPECT_TRUE(t.contains_subtree(t));
+
+    // 4. Дерево с несовпадающим корнем
+    TypeParam alien = tree_of<TypeParam>({100, 90, 110});
+    EXPECT_FALSE(t.contains_subtree(alien));
+
+    // 5. Тот же корень поддерева, но другая структура потомков
+    // В t узел 30 имеет детей 20 и 40. Создадим дерево с корнем 30, но без 20
+    TypeParam modified_30 = tree_of<TypeParam>({30, 40});
+    EXPECT_FALSE(t.contains_subtree(modified_30));
+
+    // Или с другим потомком (30 -> 20, 45 вместо 40)
+    TypeParam wrong_child_30 = tree_of<TypeParam>({30, 20, 45});
+    EXPECT_FALSE(t.contains_subtree(wrong_child_30));
+}
+
+/*============ Тесты этапа 6: прошивка и TreeEnumerator ============*/
+
+TYPED_TEST(BSTreeTest, ThreadingAndEnumeratorEmptyAndSingle) {
+    TypeParam empty_tree;
+    EXPECT_TRUE(empty_tree.is_threaded());
+    empty_tree.thread();
+    EXPECT_TRUE(empty_tree.is_threaded());
+
+    auto* en_empty = empty_tree.get_enumerator();
+    EXPECT_FALSE(en_empty->has_more_elements());
+    EXPECT_THROW(en_empty->next(), std::out_of_range);
+    delete en_empty;
+
+    TypeParam single = tree_of<TypeParam>({42});
+    EXPECT_FALSE(single.is_threaded());
+    single.thread("КЛП");
+    EXPECT_TRUE(single.is_threaded());
+
+    auto* en_single = single.get_enumerator();
+    EXPECT_TRUE(en_single->has_more_elements());
+    EXPECT_EQ(en_single->next(), 42);
+    EXPECT_FALSE(en_single->has_more_elements());
+    EXPECT_THROW(en_single->next(), std::out_of_range);
+    delete en_single;
+}
+
+TYPED_TEST(BSTreeTest, ThreadingAllSixOrdersMatchesToSequence) {
+    auto t = tree_of<TypeParam>({50, 30, 70, 20, 40, 60, 80});
+    const char* const orders[] = {"КЛП", "КПЛ", "ЛКП", "ЛПК", "ПКЛ", "ПЛК"};
+
+    for (const char* order_name : orders) {
+        TraversalOrder order = TraversalOrder::standard(order_name);
+        auto expected = t.to_sequence(order);
+
+        // 1. Проверяем ленивый итератор без предварительной прошивки
+        auto* lazy_en = t.get_enumerator(order);
+        for (int i = 0; i < expected.get_length(); i++) {
+            ASSERT_TRUE(lazy_en->has_more_elements());
+            EXPECT_EQ(lazy_en->next(), expected.get(i));
+        }
+        EXPECT_FALSE(lazy_en->has_more_elements());
+        delete lazy_en;
+
+        // 2. Прошиваем дерево в этом порядке
+        t.thread(order);
+        EXPECT_TRUE(t.is_threaded());
+
+        // 3. Проверяем обход по прошитому дереву (по указателям next)
+        auto* thread_en = t.get_enumerator();
+        for (int i = 0; i < expected.get_length(); i++) {
+            ASSERT_TRUE(thread_en->has_more_elements());
+            EXPECT_EQ(thread_en->next(), expected.get(i));
+        }
+        EXPECT_FALSE(thread_en->has_more_elements());
+        delete thread_en;
+    }
+}
+
+TYPED_TEST(BSTreeTest, UnthreadAndInvalidateOnMutation) {
+    auto t = tree_of<TypeParam>({50, 30, 70});
+    t.thread("ЛКП");
+    EXPECT_TRUE(t.is_threaded());
+
+    // Ручной unthread
+    t.unthread();
+    EXPECT_FALSE(t.is_threaded());
+
+    // Автоматическая инвалидация прошивки при вставке
+    t.thread("ЛКП");
+    EXPECT_TRUE(t.is_threaded());
+    t.insert(20);
+    EXPECT_FALSE(t.is_threaded());
+
+    // Автоматическая инвалидация прошивки при удалении
+    t.thread("ЛКП");
+    EXPECT_TRUE(t.is_threaded());
+    t.remove(20);
+    EXPECT_FALSE(t.is_threaded());
+
+    // Инвалидация при clear
+    t.thread("ЛКП");
+    EXPECT_TRUE(t.is_threaded());
+    t.clear();
+    EXPECT_TRUE(t.is_threaded()); // пустое дерево всегда threaded
+}
+
+TYPED_TEST(BSTreeTest, RemovesAnyPositionInThreadAndCanThreadAgain) {
+    for (int removed : {1, 2, 3}) {
+        auto tree = tree_of<TypeParam>({2, 1, 3});
+        tree.thread("ЛКП");
+        EXPECT_THROW(tree.remove(4), ElementNotFoundException);
+        EXPECT_TRUE(tree.is_threaded());
+
+        tree.remove(removed);
+        EXPECT_FALSE(tree.is_threaded());
+        EXPECT_TRUE(tree.check_invariants());
+        EXPECT_FALSE(tree.contains(removed));
+        EXPECT_EQ(tree.get_count(), 2);
+
+        tree.thread("ЛКП");
+        std::unique_ptr<IEnumerator<int>> values(tree.get_enumerator());
+        EXPECT_EQ(values->next(), removed == 1 ? 2 : 1);
+        EXPECT_EQ(values->next(), removed == 3 ? 2 : 3);
+        EXPECT_FALSE(values->has_more_elements());
+    }
+}
+
+/*============ Тесты этапа 7: пользовательские типы данных ============*/
+
+TEST(CustomTypesTest, ComplexNumbers) {
+    BSTree<Complex> tree;
+    tree.insert(Complex(1.0, 2.0));
+    tree.insert(Complex(-1.0, 3.0));
+    tree.insert(Complex(2.0, -1.0));
+    tree.insert(Complex(1.0, -1.0));
+
+    EXPECT_EQ(tree.get_count(), 4);
+    EXPECT_TRUE(tree.check_invariants());
+    EXPECT_TRUE(tree.contains(Complex(1.0, 2.0)));
+    EXPECT_FALSE(tree.contains(Complex(0.0, 0.0)));
+
+    // Проверка сериализации/десериализации
+    std::string text = tree.to_string("{К}(Л)[П]");
+    auto restored = BSTree<Complex>::from_string(text, "{К}(Л)[П]");
+    EXPECT_EQ(restored.get_count(), 4);
+    EXPECT_TRUE(restored.contains(Complex(1.0, 2.0)));
+    EXPECT_TRUE(restored.contains(Complex(-1.0, 3.0)));
+
+    // Дерево с компаратором по модулю
+    BSTree<Complex, ComplexAbsLess> abs_tree;
+    abs_tree.insert(Complex(3.0, 4.0)); // abs = 5
+    abs_tree.insert(Complex(1.0, 1.0)); // abs = sqrt(2)
+    abs_tree.insert(Complex(0.0, 13.0)); // abs = 13
+    EXPECT_EQ(abs_tree.get_min(), Complex(1.0, 1.0));
+    EXPECT_EQ(abs_tree.get_max(), Complex(0.0, 13.0));
+}
+
+TEST(CustomTypesTest, PersonModel) {
+    Person p1(101, "Иванов", "Иван", "Иванович", 2000);
+    Person p2(102, "Петров", "Петр", "", 1999);
+    Person p3(103, "Сидоров", "Алексей", "Сергеевич", 2001);
+
+    BSTree<Person> tree;
+    tree.insert(p1);
+    tree.insert(p2);
+    tree.insert(p3);
+
+    EXPECT_EQ(tree.get_count(), 3);
+    EXPECT_TRUE(tree.check_invariants());
+
+    // Сериализация и восстановление
+    std::string text = tree.to_string();
+    auto restored = BSTree<Person>::from_string(text);
+    EXPECT_EQ(restored.get_count(), 3);
+    EXPECT_TRUE(restored.contains(p2));
+
+    // Поиск по частичному ключу (по ID)
+    BSTree<Person, PersonByIdLess> id_tree;
+    id_tree.insert(p1);
+    id_tree.insert(p2);
+
+    Person dummy(102, "Любой", "Любой", "", 2000);
+    const Person& found = id_tree.find(dummy);
+    EXPECT_EQ(found.get_last_name(), "Петров");
+    EXPECT_EQ(found.get_birth_year(), 1999);
+}
+
+TEST(CustomTypesTest, PolynomialFunctionModel) {
+    // f(x) = 1 + 2x
+    PolynomialFunction f{1.0, 2.0};
+    EXPECT_DOUBLE_EQ(f(3.0), 7.0);
+
+    // g(x) = 3 + x^2
+    PolynomialFunction g{3.0, 0.0, 1.0};
+    EXPECT_DOUBLE_EQ(g(2.0), 7.0);
+
+    // (f o g)(x) = f(g(x)) = 1 + 2*(3 + x^2) = 7 + 2x^2
+    PolynomialFunction fog = f.compose(g);
+    EXPECT_DOUBLE_EQ(fog(0.0), 7.0);
+    EXPECT_DOUBLE_EQ(fog(2.0), 15.0); // 7 + 2*4 = 15
+    EXPECT_DOUBLE_EQ(fog.get_coeff(0), 7.0);
+    EXPECT_DOUBLE_EQ(fog.get_coeff(1), 0.0);
+    EXPECT_DOUBLE_EQ(fog.get_coeff(2), 2.0);
+
+    // Дерево полиномов
+    BSTree<PolynomialFunction> tree;
+    tree.insert(f);
+    tree.insert(g);
+    tree.insert(fog);
+    tree.insert(PolynomialFunction{0.0});
+
+    EXPECT_EQ(tree.get_count(), 4);
+    EXPECT_TRUE(tree.check_invariants());
+    EXPECT_TRUE(tree.contains(fog));
+
+    // Сериализация и восстановление
+    std::string text = tree.to_string("{К}(Л)[П]");
+    auto restored = BSTree<PolynomialFunction>::from_string(text, "{К}(Л)[П]");
+    EXPECT_EQ(restored.get_count(), 4);
+    EXPECT_TRUE(restored.contains(fog));
+}
+
+TEST(CustomTypesTest, CloseNumericKeysRemainDistinct) {
+    const Complex a(0.0, 0.0), b(0.75e-9, 0.0), c(1.5e-9, 0.0);
+    auto complex_tree = tree_of<BSTree<Complex>>({b, c, a});
+    EXPECT_TRUE(complex_tree.check_invariants());
+    EXPECT_EQ(complex_tree.get_count(), 3);
+    EXPECT_LT(a, b);
+    EXPECT_LT(b, c);
+    EXPECT_NE(a, b);
+    EXPECT_TRUE(a.is_approximately_equal(b));
+
+    ComplexAbsLess less_by_abs;
+    EXPECT_TRUE(less_by_abs(Complex(1.0), Complex(-1.0000000005)));
+
+    const PolynomialFunction f{0.0}, g{0.75e-9}, h{1.5e-9};
+    auto polynomial_tree = tree_of<BSTree<PolynomialFunction>>({g, h, f});
+    EXPECT_TRUE(polynomial_tree.check_invariants());
+    EXPECT_EQ(polynomial_tree.get_count(), 3);
+    EXPECT_LT(f, g);
+    EXPECT_LT(g, h);
+    EXPECT_NE(f, g);
+    EXPECT_TRUE(f.is_approximately_equal(g));
+
+    const PolynomialFunction small_slope{0.0, 1e-20};
+    EXPECT_EQ(small_slope.get_degree(), 1);
+    EXPECT_DOUBLE_EQ(small_slope(2.0), 2e-20);
+}
+
+TEST(CustomTypesTest, NonfiniteNumericKeysAreOrdered) {
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_LT(Complex(1.0), Complex(inf));
+    EXPECT_LT(Complex(inf), Complex(nan));
+    EXPECT_FALSE(Complex(nan) < Complex(nan));
+    EXPECT_LT(PolynomialFunction{inf}, PolynomialFunction{nan});
+    EXPECT_FALSE((PolynomialFunction{nan} < PolynomialFunction{nan}));
+}
+
+TEST(CustomTypesTest, ComplexSerializationPreservesExponentsAndSignedZero) {
+    const double subnormal = std::numeric_limits<double>::denorm_min();
+    auto tree = tree_of<BSTree<Complex>>({
+        Complex(1.0, 1e-20), Complex(-1e30, -1e-25), Complex(2.0, -0.0), Complex(3.0, subnormal)
+    });
+    auto restored = BSTree<Complex>::from_string(tree.to_string());
+    EXPECT_EQ(restored.get_count(), 4);
+    EXPECT_EQ(restored.find(Complex(1.0, 1e-20)), Complex(1.0, 1e-20));
+    EXPECT_EQ(restored.find(Complex(-1e30, -1e-25)), Complex(-1e30, -1e-25));
+    EXPECT_TRUE(std::signbit(restored.find(Complex(2.0, 0.0)).get_im()));
+    EXPECT_EQ(restored.find(Complex(3.0, subnormal)).get_im(), subnormal);
+    EXPECT_THROW(Serializer<Complex>::from_string("1e+5i"), ParseException);
+}
+
+TEST(CustomTypesTest, PersonSerializationEscapesNamesAndReadsLegacyRecords) {
+    const Person escaped(101, R"(A:\B)", "C:D", R"(E\)", 2000);
+    const Person legacy(102, R"(A\)", "C", "", 2001);
+    auto tree = tree_of<BSTree<Person>>({escaped, legacy});
+    auto restored = BSTree<Person>::from_string(tree.to_string());
+    EXPECT_EQ(restored.find(escaped), escaped);
+    EXPECT_EQ(restored.find(legacy), legacy);
+
+    const std::string legacy_record = R"(102:A\:C::2001)";
+    EXPECT_EQ(Serializer<Person>::from_string(legacy_record), legacy);
+    EXPECT_EQ(Serializer<Person>::to_string(legacy), legacy_record);
+    EXPECT_THROW(Serializer<Person>::from_string(R"(v2:101:A\q:C::2000)"), ParseException);
+}
+
+/*============ Тесты этапа 8: общие интерфейсы и операторы ============*/
+
+TEST(InterfacesAndOperatorsTest, PolymorphicICollection) {
+    // Проверка полиморфизма через ICollection<int>*
+    ICollection<int>* col = new BSTree<int>();
+    EXPECT_TRUE(col->is_empty());
+    EXPECT_EQ(col->get_count(), 0);
+
+    BSTree<int>* tree = dynamic_cast<BSTree<int>*>(col);
+    ASSERT_NE(tree, nullptr);
+    tree->insert(10);
+    tree->insert(20);
+    tree->insert(30);
+
+    EXPECT_FALSE(col->is_empty());
+    EXPECT_EQ(col->get_count(), 3);
+    EXPECT_TRUE(col->contains(20));
+    EXPECT_FALSE(col->contains(99));
+
+    // Проверка интерфейса IEnumerable через базовый указатель ICollection*
+    IEnumerator<int>* en = col->get_enumerator();
+    int count = 0;
+    while (en->has_more_elements()) {
+        en->next();
+        count++;
+    }
+    EXPECT_EQ(count, 3);
+    delete en;
+
+    col->clear();
+    EXPECT_TRUE(col->is_empty());
+    EXPECT_EQ(col->get_count(), 0);
+
+    delete col;
+}
+
+TEST(InterfacesAndOperatorsTest, EqualityOperators) {
+    BSTree<int> a;
+    BSTree<int> b;
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a != b);
+
+    a.insert(10);
+    a.insert(20);
+    EXPECT_FALSE(a == b);
+    EXPECT_TRUE(a != b);
+
+    // b собираем в другом порядке, но с теми же элементами
+    b.insert(20);
+    b.insert(10);
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a != b);
+
+    b.insert(30);
+    EXPECT_FALSE(a == b);
+}
+
+TEST(InterfacesAndOperatorsTest, EqualityIgnoresComparatorDirection) {
+    struct DirectionLess {
+        bool descending;
+        bool operator()(int a, int b) const { return descending ? a > b : a < b; }
+    };
+
+    const int values[] = {2, 1, 3};
+    BSTree<int, DirectionLess> ascending(values, 3, DirectionLess{false});
+    BSTree<int, DirectionLess> descending(values, 3, DirectionLess{true});
+    EXPECT_EQ(ascending, descending);
+    EXPECT_EQ(descending, ascending);
+    EXPECT_FALSE(ascending.contains_subtree(descending));
+
+    descending.remove(3);
+    descending.insert(4);
+    EXPECT_NE(ascending, descending);
+    EXPECT_NE(descending, ascending);
+}
+
+TEST(InterfacesAndOperatorsTest, EqualityAndSubtreeCompareFullPersonRecords) {
+    using PersonTree = BSTree<Person, PersonByIdLess>;
+    const Person root(20, "Ivanov", "Ivan", "", 2000);
+    const Person child(10, "Petrov", "Petr", "", 2001);
+    const Person changed_child(10, "Sidorov", "Petr", "", 2001);
+
+    const auto original = tree_of<PersonTree>({root, child});
+    const auto changed = tree_of<PersonTree>({root, changed_child});
+
+    EXPECT_EQ(original.find(changed_child), child);
+    EXPECT_NE(original, changed);
+    EXPECT_NE(changed, original);
+    EXPECT_FALSE(original.contains_subtree(changed));
+    EXPECT_FALSE(original.contains_subtree(tree_of<PersonTree>({changed_child})));
+    EXPECT_TRUE(original.contains_subtree(tree_of<PersonTree>({child})));
+}
+
+TEST(InterfacesAndOperatorsTest, PlusAndPlusAssignOperators) {
+    BSTree<int> a;
+    a.insert(10);
+    a.insert(20);
+
+    BSTree<int> b;
+    b.insert(20);
+    b.insert(30);
+
+    // a + b (объединение)
+    BSTree<int> c = a + b;
+    EXPECT_EQ(c.get_count(), 3);
+    EXPECT_TRUE(c.contains(10));
+    EXPECT_TRUE(c.contains(20));
+    EXPECT_TRUE(c.contains(30));
+
+    // a += item
+    a += 40;
+    EXPECT_EQ(a.get_count(), 3);
+    EXPECT_TRUE(a.contains(40));
+
+    // a += b
+    a += b;
+    EXPECT_EQ(a.get_count(), 4);
+    EXPECT_TRUE(a.contains(30));
+}
+
+TEST(InterfacesAndOperatorsTest, StreamOutputOperator) {
+    BSTree<int> tree;
+    tree.insert(2);
+    tree.insert(1);
+    tree.insert(3);
+
+    std::ostringstream oss;
+    oss << tree;
+    // По умолчанию to_string() использует КЛП {К}(Л)[П]
+    EXPECT_EQ(oss.str(), "{2}({1}()[])[{3}()[]]");
 }
