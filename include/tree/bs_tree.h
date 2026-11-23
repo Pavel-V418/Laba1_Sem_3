@@ -113,7 +113,7 @@ public:
             insert(items.get(i));
     }
 
-    // Глубокая копия (если бы скопировали только указатель корня, то 2 дерева делили бы 1 узлы, и втрой дестр. кдалил бы их повторно)
+    // Глубокая копия (если бы скопировали только указатель корня, то 2 дерева делили бы одни узлы, и втрой дестр. кдалил бы их повторно)
     BSTree(const BSTree& other)
         : root_(copy_tree(other.root_)), threaded_head_(nullptr), count_(other.count_), less_(other.less_) {}
 
@@ -195,8 +195,7 @@ public:
         return find_node(item) != nullptr;
     }
 
-    // Хранимый элемент, эквивалентный item. Полезно, когда компаратор сравнивает часть
-    // полей: find(Student с нужным id) вернёт полную запись. Нет такого => исключение.
+    // Хранимый элемент, эквивалентный item. Const - чтобы нельзя было нарушить порядок дерева
     const T& find(const T& item) const {
         const Node* node = find_node(item);
         if (node == nullptr)
@@ -211,7 +210,7 @@ public:
             throw ElementNotFoundException();
 
         unthread(); // цепочка next ещё содержит удаляемый узел
-        Node* rebalance_from; // самый нижний узел с изменившимся поддеревом
+        Node* rebalance_from; // самый нижний узел, у которого поменялось поддерево
 
         if (del_node->left == nullptr || del_node->right == nullptr) {
             // 0 или 1 ребёнок: ребёнок (или nullptr) встаёт на место del_node
@@ -285,18 +284,16 @@ public:
 
     /*============ map / where / reduce ============*/
 
-    // Новое дерево из f(a) для каждого элемента a. Тип результата может отличаться
+    // Тип результата может отличаться
     // f не обязана сохранять порядок, поэтому дерево строится заново вставками: O(n log n).
     // Если f склеивает элементы (f(a) эквивалентно f(b)), в результат попадает один из них
     template<class U = T, class CompareU = KeyLess<U>, class F>
     BSTree<U, CompareU, Balance> map(F f, CompareU less = CompareU()) const {
         BSTree<U, CompareU, Balance> result(less);
         for_each([&result, &f](const T& item) { result.try_insert(f(item)); });
-        return result;
+        return result; // новое дерево
     }
 
-    // Новое дерево из элементов, для которых pred(a) == true.
-    // Отобранные элементы уже отсортированы => идеально сбалансированное дерево за O(n).
     template<class Predicate>
     BSTree where(Predicate pred) const {
         MutableArraySequence<T> selected;
@@ -318,10 +315,9 @@ public:
     }
 
     // Строит идеально сбалансированное дерево из строго возрастающей последовательности: O(n).
-    // Сначала проверяет порядок (тоже O(n)); нарушен => std::invalid_argument.
     static BSTree from_sorted(const Sequence<T>& items, Compare less = Compare()) {
         for (int i = 1; i < items.get_length(); i++)
-            if (!less(items.get(i - 1), items.get(i)))
+            if (!less(items.get(i - 1), items.get(i))) // проверка порядка
                 throw std::invalid_argument("from_sorted: items must be strictly increasing");
 
         BSTree result(less);
@@ -413,9 +409,6 @@ public:
         return to_sequence(TraversalOrder::standard(order_name));
     }
 
-    /*итератор*/
-
-    // Класс итератора по дереву (наследует IEnumerator<T> из ЛР-2).
     // Поддерживает обход как по прошитому дереву (за O(1) на шаг),
     // так и ленивый итеративный обход непрошитого дерева в любом из 6 порядков.
     class TreeEnumerator : public IEnumerator<T> {
@@ -551,8 +544,7 @@ public:
 
     /*============ Сохранение в строку ============*/
 
-    // По формат-строке: tree.to_string("{К}(Л)[П]")
-    // Пустое поддерево - пустые скобки, пустое дерево - пустая строка. O(n).
+    // tree.to_string("{К}(Л)[П]")
     std::string to_string(const std::string& format) const {
         return to_string(TraversalOrder::parse(format));
     }
@@ -574,18 +566,17 @@ public:
             int top = stack.get_length() - 1;
             ConstFrame frame = stack.get(top);
 
-            if (frame.step == TraversalOrder::PARTS) {
-                // узел записан целиком: закрываем скобку той части родителя, в которой он стоял
+            if (frame.step == TraversalOrder::PARTS) { // узел записан
                 stack.remove_at(top);
-                if (!stack.is_empty()) {
+                if (!stack.is_empty()) { // Если под ним остался кадр родителя - обрабатываем
                     int parent_index = stack.get_length() - 1;
-                    ConstFrame parent = stack.get(parent_index);
-                    out += order.close(parent.step);
-                    stack.set(ConstFrame(parent.node, parent.step + 1), parent_index);
+                    ConstFrame parent = stack.get(parent_index); // читаем кадр родителя
+                    out += order.close(parent.step); // закрыли скобку дочернего поддерева
+                    stack.set(ConstFrame(parent.node, parent.step + 1), parent_index); // сл. шаг родителя
                 }
                 continue;
             }
-
+            // если записываем знач узла
             int step = frame.step;
             if (order.has_brackets(step))
                 out += order.open(step);
@@ -597,13 +588,13 @@ public:
                 stack.set(ConstFrame(frame.node, step + 1), top);
                 continue;
             }
-
+            // если записываем лев/прав поддерево
             const Node* child = order.part(step) == TraversalPart::Left ? frame.node->left : frame.node->right;
             if (child == nullptr) {
                 out += order.close(step);                    // пустое поддерево: "()"
-                stack.set(ConstFrame(frame.node, step + 1), top);
+                stack.set(ConstFrame(frame.node, step + 1), top); // переходим к сл части формата
             } else {
-                stack.append(ConstFrame(child, 0));          // скобку закроем, когда ребёнок допишется
+                stack.append(ConstFrame(child, 0));
             }
         }
         return out;
@@ -626,7 +617,7 @@ public:
         if (text.empty())
             return result;
 
-        int count = 0;
+        int count = 0; // счётчик узлов
         result.root_ = parse_nodes(text, order, count); // собираем дерево из текста
         result.count_ = count;
 
@@ -661,7 +652,7 @@ public:
         return visited == count_;
     }
 
-    /*============ Перегрузка операторов (этап 8) ============*/
+    /*============ Перегрузка операторов ============*/
 
     // Равенство по составу. Равные через operator== значения должны иметь
     // эквивалентные ключи для компараторов обоих деревьев.
@@ -806,32 +797,31 @@ private:
         return std::string(what) + " at position " + std::to_string(pos);
     }
 
-    static void expect(const std::string& text, std::size_t& pos, char expected) { // прочитай именно эту скобку (expected)
+    static void expect(const std::string& text, std::size_t& pos, char expected) { //проверяет символ(expected) на позиции pos
         if (pos >= text.size()) // кончилась строка
-            throw ParseException(position_message(
-            (std::string("unexpected end, expected '") + expected + "'").c_str(), pos));
+            throw ParseException(position_message((std::string("unexpected end, expected '") + expected + "'").c_str(), pos));
         if (text[pos] != expected) // на месте есть другой символ
             throw ParseException(position_message(
                 (std::string("expected '") + expected + "', got '" + text[pos] + "'").c_str(), pos));
         pos++; // правильный символ
     }
 
-    // прочитать текст значения до разделителя
+    // прочитать текст значения одного узла до разделителя
     static std::string read_value(const std::string& text, std::size_t& pos, const TraversalOrder& order) {
-        std::string value;
-        while (pos < text.size()) {
+        std::string value; // текст значения
+        while (pos < text.size()) { // пока в строке есть символ для чтения
             char c = text[pos];
-            if (c == TraversalOrder::ESCAPE) {
+            if (c == TraversalOrder::ESCAPE) { // служебный ('\')
                 if (pos + 1 >= text.size())
                     throw ParseException(position_message("dangling escape character", pos));
-                value += text[pos + 1];
-                pos += 2;
+                value += text[pos + 1]; // добавляем сл.символ как часть значения
+                pos += 2; // Пропускаем и саму \, и символ после неё
                 continue;
             }
             if (order.is_special(c))
                 break;
-            value += c;
-            pos++;
+            value += c; // Добавляем обычный символ к значению
+            pos++; // Переходим к следующему символу
         }
         return value;
     }
@@ -849,54 +839,55 @@ private:
             while (!stack.is_empty()) {
                 int top = stack.get_length() - 1;
                 BuildFrame frame = stack.get(top);
-                // узел полностью прочитан - обе ветви обработаны
-                if (frame.step == TraversalOrder::PARTS) {
+
+                if (frame.step == TraversalOrder::PARTS) {// узел полностью прочитан - обе ветви обработаны
                     update_height(frame.node);
                     stack.remove_at(top);
-                    if (!stack.is_empty()) {
+                    if (!stack.is_empty()) { // если остался кадр родителя
                         int parent_index = stack.get_length() - 1;
-                        BuildFrame parent = stack.get(parent_index);
-                        expect(text, pos, order.close(parent.step));
+                        BuildFrame parent = stack.get(parent_index); // читаем кадр родителя
+                        expect(text, pos, order.close(parent.step)); // читаем закрывающую скобку поддерева
                         if (order.part(parent.step) == TraversalPart::Left)
                             parent.node->left = frame.node;
                         else
                             parent.node->right = frame.node;
-                        frame.node->parent = parent.node;
-                        stack.set(BuildFrame(parent.node, parent.step + 1), parent_index);
+                        frame.node->parent = parent.node; // Записываем обратную ссылку на родителя
+                        stack.set(BuildFrame(parent.node, parent.step + 1), parent_index); // переход родителся к сл. части
                     }
                     continue;
                 }
-                // читаем значение узла
+                // читаем значение текущего узла
                 int step = frame.step;
                 if (order.has_brackets(step))
-                    expect(text, pos, order.open(step));
+                    expect(text, pos, order.open(step)); // читаем открывающую скобку
 
-                if (order.part(step) == TraversalPart::Root) {
-                    std::size_t value_pos = pos;
-                    std::string raw = read_value(text, pos, order);
+                if (order.part(step) == TraversalPart::Root) { // Текущая часть - K
+                    std::size_t value_pos = pos; // Запоминаем начало значения для сообщения об ошибке
+                    std::string raw = read_value(text, pos, order); // Читаем текст значения
                     try {
-                        frame.node->value = Serializer<T>::from_string(raw);
+                        frame.node->value = Serializer<T>::from_string(raw); // текст в T
                     } catch (const ParseException& e) {
                         throw ParseException(position_message(e.detail().c_str(), value_pos));
+                        // Добавляем к сообщению позицию, с которой начиналось значение
                     }
                     if (order.has_brackets(step))
                         expect(text, pos, order.close(step));
-                    stack.set(BuildFrame(frame.node, step + 1), top);
-                } else if (pos < text.size() && text[pos] == order.close(step)) {
-                    pos++;                                   // пустое поддерево
-                    stack.set(BuildFrame(frame.node, step + 1), top);
+                    stack.set(BuildFrame(frame.node, step + 1), top); // сохраняем сл шаг
+                } else if (pos < text.size() && text[pos] == order.close(step)) { // есть непрочитанный символ и этот символ - закрывающая скобка текущего поддерева
+                    pos++;// После открывающей сразу стоит закрывающая. Поддерево пустое
+                    stack.set(BuildFrame(frame.node, step + 1), top); // Продолжаем читать этот узел
                 } else {
-                    stack.append(BuildFrame(new Node(T(), nullptr), 0));
+                    stack.append(BuildFrame(new Node(T(), nullptr), 0)); // создаем ребенка
                     count++;
                 }
             }
 
-            if (pos != text.size())
+            if (pos != text.size()) // Дерево уже дочитано, но в строке ещё есть символы
                 throw ParseException(position_message("unexpected characters after the tree", pos));
         } catch (...) {
-            for (int i = 0; i < stack.get_length(); i++)
+            for (int i = 0; i < stack.get_length(); i++) // Перебираем оставшиеся кадры
                 if (stack.get(i).node != root)
-                    destroy(stack.get(i).node);
+                    destroy(stack.get(i).node); // Удаляем незавершённое поддерево из кадра
             destroy(root);
             throw;
         }

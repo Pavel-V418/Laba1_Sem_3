@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ostream>
-
 #include "function.h"
 
 inline std::ostream& operator<<(std::ostream& os, const PolynomialFunction& f) {
@@ -14,8 +13,14 @@ inline std::ostream& operator<<(std::ostream& os, const PolynomialFunction& f) {
         double c = f.get_coeff(i);
         if (c == 0.0)
             continue;
-        if (!first && c > 0)
-            os << "+";
+        if (!first) {
+            if (c < 0) {
+                os << " - ";
+                c = -c;
+            } else {
+                os << " + ";
+            }
+        }
         if (i == 0) {
             os << c;
         } else if (i == 1) {
