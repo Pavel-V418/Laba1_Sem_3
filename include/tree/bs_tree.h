@@ -22,7 +22,7 @@ struct StructurePrinter;
 template<class T, class Compare = KeyLess<T>, class Balance = AvlBalance>
 class BSTree : public ICollection<T> {
     friend Balance; // стратегия меняет структуру дерева (нужно, например, при поворотах - меняют связи узлов и вызывают replace_child)
-    friend struct bst_tree_print_detail::StructurePrinter;
+    friend struct bst_tree_print_detail::StructurePrinter; //StructurePrinter может читать закрытые поля дерева, например root_, чтобы напечатать его структуру
 
 private:
     struct Node {
